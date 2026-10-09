@@ -1,0 +1,109 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import load_iris
+from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler, label_binarize
+from sklearn.pipeline import make_pipeline
+from sklearn.metrics import (
+    accuracy_score, cohen_kappa_score, confusion_matrix,
+    classification_report, roc_curve, auc
+)
+
+# 1. Load Iris dataset
+iris = load_iris()
+X = iris.data
+y = iris.target
+class_names = iris.target_names
+
+# 2. Define classifiers
+classifiers = {
+    "ID3 (approx.)": DecisionTreeClassifier(
+        criterion="entropy", random_state=42
+    ),
+    "J48 (approx.)": DecisionTreeClassifier(
+        criterion="entropy", random_state=42
+    ),
+    "Naive Bayes": GaussianNB(),
+    "k-NN (k=3)": make_pipeline(
+        StandardScaler(),
+        KNeighborsClassifier(n_neighbors=3)
+    )
+}
+
+cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+
+# 3. Calculate root entropy
+counts = np.bincount(y)
+probabilities = counts / len(y)
+entropy = -np.sum(probabilities * np.log2(probabilities))
+print("Root Entropy:", round(entropy, 4))
+
+# 4. Train, evaluate, and plot ROC curves
+results = []
+
+plt.figure(figsize=(9, 7))
+y_binary = label_binarize(y, classes=np.unique(y))
+
+for name, model in classifiers.items():
+    predictions = cross_val_predict(model, X, y, cv=cv)
+    probabilities_cv = cross_val_predict(
+        model, X, y, cv=cv, method="predict_proba"
+    )
+
+    accuracy = accuracy_score(y, predictions)
+    kappa = cohen_kappa_score(y, predictions)
+    cm = confusion_matrix(y, predictions)
+
+    print("\n==========", name, "==========")
+    print("Accuracy:", round(accuracy * 100, 2), "%")
+    print("Kappa:", round(kappa, 4))
+    print("Confusion Matrix:\n", cm)
+    print("Classification Report:\n",
+          classification_report(y, predictions,
+                                target_names=class_names))
+
+    # Macro-average ROC curve for multiclass classification
+    fpr, tpr, _ = roc_curve(
+        y_binary.ravel(), probabilities_cv.ravel()
+    )
+    roc_auc = auc(fpr, tpr)
+
+    plt.plot(fpr, tpr, label=f"{name} (AUC={roc_auc:.3f})")
+
+    results.append((name, accuracy * 100, kappa, roc_auc))
+
+# 5. Extract decision tree rules from the full Iris dataset
+tree = DecisionTreeClassifier(
+    criterion="entropy", random_state=42
+)
+tree.fit(X, y)
+
+print("\nDecision Tree Rules:")
+print(export_text(tree, feature_names=list(iris.feature_names)))
+
+# 6. Plot ROC curves
+plt.plot([0, 1], [0, 1], "k--")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve Comparison - Iris Dataset")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# 7. Comparison table
+print("\n========== CLASSIFIER COMPARISON ==========")
+print("{:<18} {:<12} {:<12} {:<12}".format(
+    "Classifier", "Accuracy %", "Kappa", "ROC AUC"
+))
+
+for name, acc, kap, roc_auc in results:
+    print("{:<18} {:<12.2f} {:<12.4f} {:<12.4f}".format(
+        name, acc, kap, roc_auc
+    ))
+
+print("\nExperiment completed.")
